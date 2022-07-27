@@ -7,21 +7,6 @@ import datetime
 import aioschedule
 import asyncio
 import sqlite3
-bot_token = ''
-api_id = 0
-api_hash = ''
-group_id = 0
-admin_id = 0
-bot = Bot(bot_token)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-polls = {}
-projects_set_by_admin = []
-chosen_projects = {}
-current_chat = 0
-chat_members = []
-chat_admins = []
-message_sample = None
 # 1. Install libs: pip install aiogram pip install pyrogram pip install aioschedule pip install asyncio
 # You can install SQLite to monitor changes in DB. To install it for Windows download 2 files
 # from https://www.sqlite.org/download.html from Precompiled Binaries for Windows:
@@ -32,6 +17,14 @@ message_sample = None
 # bot token (i use my phone) to login https://my.telegram.org/.
 # You have to enter confirmation code sent to your phone.
 # Now you can use app
+bot_token, api_hash = '', ''
+api_id, admin_id, group_id = 0, 0, 0
+user_id = 0
+polls, chosen_projects, question_index = {}, {}, {}
+projects_set_by_admin, chat_members, chat_admins = [], [], []
+bot = Bot(bot_token)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
 
 def get_chat_members():
@@ -107,8 +100,7 @@ async def cmd_start(message: types.Message):
 
 @dp.message_handler(state=Form.project)
 async def admin_set_projects(message: types.Message, state: FSMContext):
-    global projects_set_by_admin, message_sample
-    message_sample = state
+    global projects_set_by_admin
     projects_set_by_admin = []
     async with state.proxy() as data:
         data['project_name'] = message.text
@@ -135,24 +127,58 @@ async def create_1st_poll():
 
 @dp.poll_answer_handler()
 async def voting(call):
-    global chosen_projects, current_chat, worker_daily_stat, message_sample
+    global chosen_projects, user_id, worker_daily_stat
     projects = []
-    current_chat = call.user.id
+    user_id = call.user.id
     for project_num in call.option_ids:
         projects.append(projects_set_by_admin[project_num])
-    chosen_projects[current_chat] = projects
-    await create_questions_from_polls(None, message_sample)
+    chosen_projects[user_id] = projects
+    await Form.final_answer.set()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
+    markup.add("Продолжить")
+    await bot.send_message(user_id, "Нажмите продолжить", reply_markup=markup)
 
 
-@dp.message_handler()
+@dp.message_handler(lambda message: message.text in ["Продолжить"], state=Form.final_answer)
 async def create_questions_from_polls(message: types.Message, state: FSMContext):
+    # Attribute of function cant be removed cause without it function raises error
+    global user_id, question_index, chosen_projects
+    question_index[user_id] = 0
     await Form.answer.set()
-    global current_chat
-    for project in chosen_projects[current_chat]:
-        await bot.send_message(current_chat, f'Сколько вы работали над {project}?')
+    try:
+        project = chosen_projects[user_id][question_index[user_id]]
+        await bot.send_message(user_id, f'Сколько вы работали над {project}?')
+        polls[user_id] = project
+        question_index[user_id] += 1
+        await Form.final_answer.set()
+    except IndexError:
+        await bot.send_message(user_id, f'Произошла ошибка, обратитесь к администратору')
+        await state.finish()
 
-    current_chat = 0
-    await state.finish()
+
+@dp.message_handler(lambda message: message.text not in ["Продолжить"], state=Form.final_answer)
+async def create_questions_from_polls(message: types.Message, state: FSMContext):
+    global user_id, question_index, worker_daily_stat, user_id, chosen_projects
+    async with state.proxy() as data:
+        data['answer'] = message.text
+    hours = data['answer']
+    worker_daily_stat += 1
+    now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
+           f'{datetime.datetime.now().day}')
+    data_tuple = (worker_daily_stat, now, polls[user_id], user_id,
+                  user_id, user_id, hours)
+    insert_into_db(data_tuple)
+    await Form.answer.set()
+    try:
+        project = chosen_projects[user_id][question_index[user_id]]
+        await bot.send_message(user_id, f'Сколько часов вы работали над {project}?')
+        polls[user_id] = project
+        question_index[user_id] += 1
+        await Form.final_answer.set()
+    except IndexError:
+        user_id = 0
+        question_index = {}
+        await state.finish()
 
 
 if __name__ == '__main__':
