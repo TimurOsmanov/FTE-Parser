@@ -17,18 +17,17 @@ import sqlite3
 # bot token (i use my phone) to login https://my.telegram.org/.
 # You have to enter confirmation code sent to your phone.
 # Now you can use app
+# 3. Bot will work correctly if you create group and then add bot there
 bot_token, api_hash = '', ''
-api_id, admin_id, group_id = 0, 0, 0
-user_id = 0
-polls, chosen_projects, question_index = {}, {}, {}
-projects_set_by_admin, chat_members, chat_admins = [], [], []
+api_id, group_id, user_id, manager_group_id = 0, 0, 0, 0
+polls, chosen_projects, question_index, report = {}, {}, {}, {}
+projects_set_by_admin, chat_members, chat_admins = [], [], [0, 0]
 bot = Bot(bot_token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 
 def get_chat_members():
-    global chat_admins
     with Client("my_account", api_id, api_hash) as app:
         for member in app.get_chat_members(group_id):
             if not member.user.is_bot:
@@ -50,22 +49,40 @@ def get_worker_daily_stat():
 
 def insert_into_db(data_tuple):
     # Function inserts new record according to new answer in poll
-    with sqlite3.connect('sqlite_python.db') as conn3:
-        cursor3 = conn3.cursor()
-        insert_info = '''INSERT INTO FTE_info (unique_id, date, project,
-        first_name, username, user_id, hours) VALUES (?, ?, ?, ?, ?, ?, ?)'''
+    with sqlite3.connect('sqlite_python.db') as conn2:
+        cursor3 = conn2.cursor()
+        insert_info = '''INSERT INTO FTE_info (unique_id, date, project, 
+        user_id, hours) VALUES (?, ?, ?, ?, ?)'''
         cursor3.execute(insert_info, data_tuple)
 
 
+def check_answers():
+    global report
+    with sqlite3.connect('sqlite_python.db') as conn3:
+        now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
+               f'{datetime.datetime.now().day}')
+        cursor1 = conn3.cursor()
+        select_info = f"SELECT user_id, SUM(hours) FROM FTE_info WHERE date = '{now}' GROUP BY user_id"
+        cursor1.execute(select_info)
+        daily_stat_raw = cursor1.fetchall()
+        daily_stat = {user[0]: user[1] for user in daily_stat_raw}
+        for worker in chat_members:
+            if worker in daily_stat:
+                if not 6 <= daily_stat[worker] <= 12:
+                    report[worker] = daily_stat[worker]
+            else:
+                report[worker] = 'не ответил/ не работал'
+        # change worker to full name of worker
+        # must work async
+
+
 try:
-    with sqlite3.connect('sqlite_python.db') as conn2:
-        cursor2 = conn2.cursor()
+    with sqlite3.connect('sqlite_python.db') as conn4:
+        cursor2 = conn4.cursor()
         create_table = '''CREATE TABLE FTE_info (
                                 unique_id INTEGER PRIMARY KEY,
                                 date datetime,
                                 project text,
-                                first_name text,
-                                username text,
                                 user_id INTEGER,
                                 hours REAL NOT NULL)'''
         cursor2.execute(create_table)
@@ -87,11 +104,13 @@ class Form(StatesGroup):
     project_name = State()
     answer = State()
     final_answer = State()
+    end = State()
 
 
 @dp.message_handler(commands=['set_projects'])
 async def cmd_start(message: types.Message):
-    if message.from_user.id == admin_id:
+    global chat_admins
+    if message.from_user.id in chat_admins:
         await Form.project.set()
         await message.reply("Перечислите проекты через запятую без пробелов")
     else:
@@ -105,6 +124,7 @@ async def admin_set_projects(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['project_name'] = message.text
     projects_set_by_admin = data['project_name'].split(',')
+    projects_set_by_admin = list(map(lambda x: x.strip(), projects_set_by_admin))
     await state.finish()
 
 
@@ -112,7 +132,7 @@ async def admin_set_projects(message: types.Message, state: FSMContext):
 async def cmd_start(message: types.Message):
     # Attribute of function cant be removed cause without it function raises error
     await create_1st_poll()
-    # aioschedule.every().day.at('').do(create_1st_poll)
+    # aioschedule.every().day.at('08:00').do(create_1st_poll)
     # while True:
     #     await aioschedule.run_pending()
     #     await asyncio.sleep(1)
@@ -121,7 +141,7 @@ async def cmd_start(message: types.Message):
 async def create_1st_poll():
     global projects_set_by_admin, chat_members
     for user in chat_members:
-        await bot.send_poll(user, 'В каких проектах вы принимали участие?',
+        await bot.send_poll(user, 'В каких проектах вы принимали участие вчера?',
                             projects_set_by_admin, is_anonymous=False, allows_multiple_answers=True)
 
 
@@ -147,7 +167,7 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
     await Form.answer.set()
     try:
         project = chosen_projects[user_id][question_index[user_id]]
-        await bot.send_message(user_id, f'Сколько вы работали над {project}?')
+        await bot.send_message(user_id, f'Сколько часов вы были заняты на проекте {project} вчера?')
         polls[user_id] = project
         question_index[user_id] += 1
         await Form.final_answer.set()
@@ -165,20 +185,33 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
     worker_daily_stat += 1
     now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
            f'{datetime.datetime.now().day}')
-    data_tuple = (worker_daily_stat, now, polls[user_id], user_id,
-                  user_id, user_id, hours)
+    data_tuple = (worker_daily_stat, now, polls[user_id], user_id, hours)
     insert_into_db(data_tuple)
     await Form.answer.set()
     try:
         project = chosen_projects[user_id][question_index[user_id]]
-        await bot.send_message(user_id, f'Сколько часов вы работали над {project}?')
+        await bot.send_message(user_id, f'Сколько часов вы были заняты на проекте {project} вчера?')
         polls[user_id] = project
         question_index[user_id] += 1
         await Form.final_answer.set()
     except IndexError:
-        user_id = 0
         question_index = {}
+        await bot.send_message(user_id, f'Спасибо, ваши данные учтены')
+        user_id = 0
         await state.finish()
+
+
+async def greetings():
+    global group_id
+    await bot.send_message(group_id, 'Вас добавили в рабочую группу, напишите боту (этому), чтобы он '
+                                     'мог получать от вас данные')
+
+
+@dp.message_handler(content_types=['new_chat_members'])
+async def new_user_joined(message: types.Message):
+    for new_member in message.new_chat_members:
+        chat_members.append(new_member.id)
+        await greetings()
 
 
 if __name__ == '__main__':
