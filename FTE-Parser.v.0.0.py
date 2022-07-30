@@ -19,7 +19,7 @@ import sqlite3
 # Now you can use app
 # 3. Bot will work correctly if you create group and then add bot there
 bot_token, api_hash = '', ''
-api_id, group_id, user_id, manager_group_id, new_user_id = 0, 0, 0, 0, 0
+api_id, group_id, user_id, manager_group_id = 0, 0, 0, 0
 polls, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}
 projects_set_by_admin, chat_members, chat_admins = [], [], [0, 0]
 bot = Bot(bot_token)
@@ -190,35 +190,35 @@ async def voting(call):
 @dp.message_handler(lambda message: message.text in ["Продолжить"], state=Form.final_answer)
 async def create_questions_from_polls(message: types.Message, state: FSMContext):
     # Attribute of function cant be removed cause without it function raises error
-    global user_id, question_index, chosen_projects
+    global question_index, chosen_projects
     markup_remove = types.ReplyKeyboardRemove()
-    question_index[user_id] = 0
+    question_index[message.chat.id] = 0
     try:
-        project = chosen_projects[user_id][question_index[user_id]]
-        await bot.send_message(user_id, f'Сколько часов вы были заняты на проекте {project} вчера?',
+        project = chosen_projects[message.chat.id][question_index[message.chat.id]]
+        await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?',
                                reply_markup=markup_remove)
-        polls[user_id] = project
-        question_index[user_id] += 1
+        polls[message.chat.id] = project
+        question_index[message.chat.id] += 1
         await Form.final_answer2.set()
     except IndexError:
-        await bot.send_message(user_id, f'Произошла ошибка, обратитесь к администратору')
+        await bot.send_message(message.chat.id, f'Произошла ошибка, обратитесь к администратору')
         await state.finish()
 
 
 @dp.message_handler(lambda message: message.text not in ["Продолжить"], state=Form.final_answer)
 async def create_questions_from_polls(message: types.Message):
     # Attribute of function cant be removed cause without it function raises error
-    await bot.send_message(user_id, f"Вам нужно нажать кнопку 'Продолжить' или написать"
-                                    f" Продолжить ")
+    await bot.send_message(message.chat.id, f"Вам нужно нажать кнопку 'Продолжить' или написать"
+                                            f" Продолжить ")
     await Form.final_answer.set()
 
 
 @dp.message_handler(state=Form.final_answer2)
 async def create_questions_from_polls(message: types.Message, state: FSMContext):
-    global user_id, question_index, worker_daily_stat, user_id, chosen_projects
+    global question_index, worker_daily_stat, chosen_projects
     replaced_message_text = message.text.replace(',', '').replace('.', '')
     if not replaced_message_text.isdigit():
-        await bot.send_message(user_id, f'Ответ должен быть числом')
+        await bot.send_message(message.chat.id, f'Ответ должен быть числом')
         await Form.final_answer2.set()
     else:
         async with state.proxy() as data:
@@ -227,18 +227,17 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
         worker_daily_stat += 1
         now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
                f'{datetime.datetime.now().day}')
-        data_tuple = (worker_daily_stat, now, polls[user_id], user_id, hours.replace(',', '.'))
+        data_tuple = (worker_daily_stat, now, polls[message.chat.id], message.chat.id, hours.replace(',', '.'))
         insert_into_db(data_tuple)
         try:
-            project = chosen_projects[user_id][question_index[user_id]]
-            await bot.send_message(user_id, f'Сколько часов вы были заняты на проекте {project} вчера?')
-            polls[user_id] = project
-            question_index[user_id] += 1
+            project = chosen_projects[message.chat.id][question_index[message.chat.id]]
+            await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?')
+            polls[message.chat.id] = project
+            question_index[message.chat.id] += 1
             await Form.final_answer2.set()
         except IndexError:
             question_index = {}
-            await bot.send_message(user_id, f'Спасибо, ваши данные учтены')
-            user_id = 0
+            await bot.send_message(message.chat.id, f'Спасибо, ваши данные учтены')
             await state.finish()
 
 
@@ -264,28 +263,26 @@ async def greetings():
 
 @dp.message_handler(content_types=['new_chat_members'])
 async def new_user_joined(message: types.Message):
-    global group_id, new_user_id
+    global group_id
     if message.chat.id == group_id:
         for new_member in message.new_chat_members:
             chat_members.append(new_member.id)
-            new_user_id = new_member.id
             await greetings()
 
 
 @dp.message_handler()
 async def first_message_to_bot(message: types.Message):
-    global new_user_id
     await Form.first_message.set()
-    await bot.send_message(new_user_id, 'Напишите свое ФИО')
+    await bot.send_message(message.chat.id, 'Напишите свое ФИО')
 
 
 @dp.message_handler(state=Form.first_message)
 async def first_message_to_bot(message: types.Message, state: FSMContext):
-    global new_user_id, workers_in_db
-    if new_user_id not in workers_in_db:
-        data_tuple = (new_user_id, message.text)
+    global workers_in_db
+    if message.chat.id not in workers_in_db:
+        data_tuple = (message.chat.id, message.text)
         add_new_member_to_workers_info(data_tuple)
-        await bot.send_message(new_user_id, 'Вы добавлены в базу')
+        await bot.send_message(message.chat.id, 'Вы добавлены в базу')
         await state.finish()
     else:
         await state.finish()
