@@ -19,9 +19,11 @@ import sqlite3
 # Now you can use app
 # 3. Bot will work correctly if you create group and then add bot there
 bot_token, api_hash = '', ''
-api_id, group_id, user_id, manager_group_id = 0, 0, 0, 0
-polls, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}
-projects_set_by_admin, chat_members, chat_admins = [], [], [0, 0]
+api_id, group_id, manager_group_id = 0, 0, 0
+polls, projects_by_polls, questions, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}, {}, {}
+polls_num = {}
+projects_set_by_admin, projects_set_by_admin_div, chat_members, chat_admins = [], [], [], [0, 0]
+lost_names = []
 bot = Bot(bot_token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
@@ -57,6 +59,9 @@ def get_workers_names():
         workers_in_db = {user[0]: user[1] for user in names}
 
 
+get_workers_names()
+
+
 def insert_into_db(data_tuple):
     # Function inserts new record according to new answer in poll
     with sqlite3.connect('sqlite_python.db') as conn3:
@@ -67,7 +72,8 @@ def insert_into_db(data_tuple):
 
 
 def check_answers():
-    global report
+    global report, lost_names
+    get_workers_names()
     with sqlite3.connect('sqlite_python.db') as conn4:
         now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
                f'{datetime.datetime.now().day}')
@@ -77,12 +83,14 @@ def check_answers():
         daily_stat_raw = cursor4.fetchall()
         daily_stat = {user[0]: user[1] for user in daily_stat_raw}
         for worker in chat_members:
-            if worker in daily_stat:
-                if not 6 <= daily_stat[worker] <= 12:
-                    report[workers_in_db[worker]] = daily_stat[worker]
-            else:
-                report[workers_in_db[worker]] = 'не ответил/не работал'
-        return report
+            try:
+                if worker in daily_stat:
+                    if not 6 <= daily_stat[worker] <= 12:
+                        report[workers_in_db[worker]] = daily_stat[worker]
+                else:
+                    report[workers_in_db[worker]] = 'не ответил/не работал'
+            except KeyError:
+                lost_names.append(worker)
 
 
 def add_new_member_to_workers_info(data_tuple):
@@ -147,12 +155,28 @@ async def cmd_start(message: types.Message):
 
 @dp.message_handler(state=Form.project)
 async def admin_set_projects(message: types.Message, state: FSMContext):
-    global projects_set_by_admin
-    projects_set_by_admin = []
+    global projects_set_by_admin, projects_set_by_admin_div
+    projects_set_by_admin, projects_set_by_admin_div = [], []
     async with state.proxy() as data:
         data['project_name'] = message.text
     projects_set_by_admin = data['project_name'].split(',')
     projects_set_by_admin = list(map(lambda x: x.strip(), projects_set_by_admin))
+    temp = []
+    i = 0
+    while i - len(projects_set_by_admin) != 0:
+        temp.append(projects_set_by_admin[i])
+        i += 1
+        if i % 9 == 0:
+            temp.append('Не участвовал в вышеперечисленных проектах')
+            projects_set_by_admin_div.append(temp)
+            temp = []
+    if temp:
+        if len(temp) == 1:
+            temp.append('Не участвовал в вышеперечисленных проектах')
+            projects_set_by_admin_div.append(temp)
+        else:
+            temp.append('Не участвовал в вышеперечисленных проектах')
+            projects_set_by_admin_div.append(temp)
     await state.finish()
 
 
@@ -167,24 +191,34 @@ async def cmd_start(message: types.Message):
 
 
 async def create_1st_poll():
-    global projects_set_by_admin, chat_members
+    global projects_set_by_admin_div, chat_members, polls, polls_num, projects_by_polls, question_index
+    polls, polls_num, projects_by_polls, question_index = {}, {}, {}, {}
     for user in chat_members:
-        await bot.send_poll(user, 'В каких проектах вы принимали участие вчера?',
-                            projects_set_by_admin, is_anonymous=False, allows_multiple_answers=True)
+        for group_projects in projects_set_by_admin_div:
+            new_poll = await bot.send_poll(user, 'В каких проектах вы принимали участие вчера?',
+                                           group_projects, is_anonymous=False, allows_multiple_answers=True)
+            polls[new_poll.poll.id] = group_projects
 
 
 @dp.poll_answer_handler()
 async def voting(call):
-    global chosen_projects, user_id, worker_daily_stat
-    projects = []
-    user_id = call.user.id
+    global chosen_projects, worker_daily_stat, projects_by_polls, polls_num, projects_set_by_admin_div
+    if call.user.id not in polls_num:
+        polls_num[call.user.id] = len(projects_set_by_admin_div)
+    polls_num[call.user.id] -= 1
     for project_num in call.option_ids:
-        projects.append(projects_set_by_admin[project_num])
-    chosen_projects[user_id] = projects
-    await Form.final_answer.set()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
-    markup.add("Продолжить")
-    await bot.send_message(user_id, "Нажмите продолжить", reply_markup=markup)
+        if call.user.id not in projects_by_polls:
+            if polls[call.poll_id][project_num] != 'Не участвовал в вышеперечисленных проектах':
+                projects_by_polls[call.user.id] = [polls[call.poll_id][project_num]]
+        else:
+            if polls[call.poll_id][project_num] != 'Не участвовал в вышеперечисленных проектах':
+                projects_by_polls[call.user.id].append(polls[call.poll_id][project_num])
+    if polls_num[call.user.id] == 0:
+        chosen_projects[call.user.id] = projects_by_polls[call.user.id]
+        await Form.final_answer.set()
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
+        markup.add("Продолжить")
+        await bot.send_message(call.user.id, "Нажмите продолжить", reply_markup=markup)
 
 
 @dp.message_handler(lambda message: message.text in ["Продолжить"], state=Form.final_answer)
@@ -197,7 +231,7 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
         project = chosen_projects[message.chat.id][question_index[message.chat.id]]
         await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?',
                                reply_markup=markup_remove)
-        polls[message.chat.id] = project
+        questions[message.chat.id] = project
         question_index[message.chat.id] += 1
         await Form.final_answer2.set()
     except IndexError:
@@ -227,32 +261,31 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
         worker_daily_stat += 1
         now = (f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'
                f'{datetime.datetime.now().day}')
-        data_tuple = (worker_daily_stat, now, polls[message.chat.id], message.chat.id, hours.replace(',', '.'))
+        data_tuple = (worker_daily_stat, now, questions[message.chat.id], message.chat.id, hours.replace(',', '.'))
         insert_into_db(data_tuple)
         try:
             project = chosen_projects[message.chat.id][question_index[message.chat.id]]
             await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?')
-            polls[message.chat.id] = project
+            questions[message.chat.id] = project
             question_index[message.chat.id] += 1
             await Form.final_answer2.set()
         except IndexError:
-            question_index = {}
             await bot.send_message(message.chat.id, f'Спасибо, ваши данные учтены')
             await state.finish()
 
 
 async def checking():
-    global report
-    if report == {}:
-        get_workers_names()
-        check_answers()
+    global report, lost_names
+    check_answers()
     for key, value in report.items():
         if isinstance(value, float):
             report[key] = round(float(value), 2)
         else:
             report[key] = value
     await bot.send_message(manager_group_id, f'{report}')
-    report = {}
+    if lost_names:
+        await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту')
+    report, lost_names = {}, []
 
 
 async def greetings():
