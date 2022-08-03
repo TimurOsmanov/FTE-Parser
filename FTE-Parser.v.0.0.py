@@ -144,7 +144,7 @@ class Form(StatesGroup):
 
 
 @dp.message_handler(commands=['set_projects'])
-async def cmd_start(message: types.Message):
+async def set_projects(message: types.Message):
     global chat_admins
     if message.from_user.id in chat_admins:
         await Form.project.set()
@@ -180,17 +180,18 @@ async def admin_set_projects(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
+@dp.message_handler(commands=['send_polls'])
+async def sen_polls(message: types.Message):
     # Attribute of function cant be removed cause without it function raises error
-    aioschedule.every().day.at('08:00').do(create_1st_poll)
-    aioschedule.every().day.at('09:00').do(checking)
-    while True:
-        await aioschedule.run_pending()
-        await asyncio.sleep(1)
+    if message.from_user.id in chat_admins:
+        aioschedule.every().day.at('08:00').do(create_polls)
+        aioschedule.every().day.at('09:00').do(checking)
+        while True:
+            await aioschedule.run_pending()
+            await asyncio.sleep(1)
 
 
-async def create_1st_poll():
+async def create_polls():
     global projects_set_by_admin_div, chat_members, polls, polls_num, projects_by_polls, question_index
     polls, polls_num, projects_by_polls, question_index = {}, {}, {}, {}
     for user in chat_members:
@@ -288,29 +289,33 @@ async def checking():
     report, lost_names = {}, []
 
 
-async def greetings():
+async def greetings(new_member_id):
     global group_id
-    await bot.send_message(group_id, 'Вас добавили в рабочую группу, напишите боту (этому), чтобы он '
-                                     'мог получать от вас данные')
+    await bot.send_message(group_id, f"User_id {new_member_id} \n"
+                                     f"Вас добавили в рабочую группу, откройте чат с ботом @FTE_tracker_bot"
+                                     f" и нажмите кнопку 'Старт', чтобы он мог получать от вас данные")
 
 
 @dp.message_handler(content_types=['new_chat_members'])
 async def new_user_joined(message: types.Message):
+    get_workers_names()
     global group_id
     if message.chat.id == group_id:
         for new_member in message.new_chat_members:
-            chat_members.append(new_member.id)
-            await greetings()
+            if new_member.id not in workers_in_db:
+                chat_members.append(new_member.id)
+                await greetings(new_member.id)
 
 
-@dp.message_handler()
-async def first_message_to_bot(message: types.Message):
+@dp.message_handler(commands=['start'])
+async def send_full_name(message: types.Message):
     await Form.first_message.set()
     await bot.send_message(message.chat.id, 'Напишите свое ФИО')
 
 
 @dp.message_handler(state=Form.first_message)
 async def first_message_to_bot(message: types.Message, state: FSMContext):
+    get_workers_names()
     global workers_in_db
     if message.chat.id not in workers_in_db:
         data_tuple = (message.chat.id, message.text)
