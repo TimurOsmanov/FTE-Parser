@@ -477,12 +477,8 @@ async def admin_set_projects(message: types.Message, state: FSMContext):
             projects_set_by_admin_div.append(temp)
             temp = []
     if temp:
-        if len(temp) == 1:
-            temp.append('Не участвовал в вышеперечисленных проектах')
-            projects_set_by_admin_div.append(temp)
-        else:
-            temp.append('Не участвовал в вышеперечисленных проектах')
-            projects_set_by_admin_div.append(temp)
+        temp.append('Не участвовал в вышеперечисленных проектах')
+        projects_set_by_admin_div.append(temp)
     await state.finish()
 
 
