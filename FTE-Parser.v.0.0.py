@@ -3,6 +3,7 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils.exceptions import PollHasAlreadyBeenClosed
+from aiogram.dispatcher.filters import Text
 from pyrogram import Client
 import datetime
 import aioschedule
@@ -450,6 +451,17 @@ class Form(StatesGroup):
     get_period_stat = State()
 
 
+@dp.message_handler(state='*', commands=['cancel'])
+@dp.message_handler(Text(equals='cancel', ignore_case=True), state='*')
+async def cancel_handler(message: types.Message, state: FSMContext):
+    # Allow user to cancel any action
+    current_state = await state.get_state()
+    if current_state is None:
+        return
+    await message.reply('Команда отменена.', reply_markup=types.ReplyKeyboardRemove())
+    await state.finish()
+
+
 @dp.message_handler(commands=['set_projects'])
 async def set_projects(message: types.Message):
     global chat_admins
@@ -667,6 +679,10 @@ async def get_period_stats(message: types.Message, state: FSMContext):
         await bot.send_message(message.chat.id, 'Файл статистики открыт на сервере. \n'
                                                 'Попросите администратора закрыть файл')
         await state.finish()
+    except (IndexError, ValueError):
+        # Error if user input wrong data
+        await bot.send_message(message.chat.id, 'Вы ввели данные неверно.\nПопробуйте снова')
+        await Form.get_period_stat.set()
 
 
 async def monthly_checking():
@@ -700,7 +716,7 @@ async def monthly_checking():
         except PermissionError:
             # Error if your doc is opened on server
             await bot.send_message(manager_group_id, 'Файл статистики открыт на сервере. \n'
-                                                     'Попросите администратора закрыть файл')
+                                                     'Попросите администратора закрыть файлы и выслать вам их вручную ')
 
 
 async def clean_folder():
