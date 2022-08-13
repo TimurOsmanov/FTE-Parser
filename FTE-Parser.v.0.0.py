@@ -14,9 +14,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import itertools
 from PyPDF2 import PdfFileReader, PdfFileWriter
+import os
 
 # 1. Install libs: pip install aiogram pip install pyrogram pip install aioschedule pip install asyncio
-# pip install matplotlib pip install PyPDF2 pip install pandas pip3 install openpyxl
+# pip install matplotlib pip install PyPDF2 pip install pandas pip3 install openpyxl pip install PyInstaller
 # You can install SQLite to monitor changes in DB. To install it for Windows download 2 files
 # from https://www.sqlite.org/download.html from Precompiled Binaries for Windows:
 # first is sqlite-dll-win32-x86-3390200.zip or sqlite-dll-win64-x64-3390200.zip according to your system (32/64),
@@ -28,12 +29,15 @@ from PyPDF2 import PdfFileReader, PdfFileWriter
 # Now you can use app
 # 3. Bot will work correctly if you create group and then add bot there
 
-bot_token, api_hash = '', ''
-api_id, group_id, manager_group_id = 0, 0, 0
-polls, projects_by_polls, questions, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}, {}, {}
-polls_num, polls_close = {}, {}
-projects_set_by_admin, projects_set_by_admin_div, chat_members, chat_admins = [], [], [], [0, 0]
-lost_names = []
+bot_token = ''
+api_hash, api_id = '', 0
+group_id, manager_group_id = 0, 0
+chat_admins = [0, 0]
+
+polls, projects_by_polls, polls_num, polls_close = {}, {}, {}, {}
+questions, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}
+projects_set_by_admin, projects_set_by_admin_div, chat_members, lost_names = [], [], [], []
+
 bot = Bot(bot_token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
@@ -486,10 +490,10 @@ async def admin_set_projects(message: types.Message, state: FSMContext):
 async def send_polls(message: types.Message):
     # Attribute of function cant be removed cause without it function raises error
     if message.from_user.id in chat_admins:
-        await create_polls()
         aioschedule.every().day.at('08:00').do(create_polls)
         aioschedule.every().day.at('09:00').do(checking)
         aioschedule.every().day.at('10:00').do(monthly_checking)
+        aioschedule.every().day.at('08:00').do(clean_folder)
         while True:
             await aioschedule.run_pending()
             await asyncio.sleep(1)
@@ -701,6 +705,13 @@ async def monthly_checking():
             # Error if your doc is opened on server
             await bot.send_message(manager_group_id, 'Файл статистики открыт на сервере. \n'
                                                      'Попросите администратора закрыть файл')
+
+
+async def clean_folder():
+    files = [x for x in os.listdir(os.path.dirname(__file__)) if '.pdf' in x or '.png' in x or 'xlsx' in x]
+    for file in files:
+        path = os.path.join(os.path.abspath(os.path.dirname(__file__)), file)
+        os.remove(path)
 
 
 # USER-PART
