@@ -533,7 +533,7 @@ async def voting(call):
         polls_num[call.user.id] += 1
         await bot.stop_poll(call.user.id, polls_close[call.user.id][call.poll_id][0])
         del projects_by_polls[call.user.id][call.poll_id]
-        await bot.send_message(call.user.id, "Вы отозвали голос из одного из опросов.\n"
+        await bot.send_message(call.user.id, "Вы отозвали голос из одного из опросов. "
                                              "Вам необходимо проголосовать заново")
         new_poll = await bot.send_poll(call.user.id, 'В каких проектах вы принимали участие вчера?',
                                        projects_set_by_admin_div[polls_close[call.user.id][call.poll_id][1]],
@@ -565,7 +565,6 @@ async def voting(call):
 
 @dp.message_handler(lambda message: message.text in ["Продолжить"], state=Form.final_answer)
 async def create_questions_from_polls(message: types.Message, state: FSMContext):
-    # Attribute of function cant be removed cause without it function raises error
     global question_index, chosen_projects, polls_close
     markup_remove = types.ReplyKeyboardRemove()
     for poll_to_close in polls_close[message.chat.id]:
@@ -582,7 +581,9 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
         question_index[message.chat.id] += 1
         await Form.final_answer2.set()
     except IndexError:
-        await bot.send_message(message.chat.id, f'Произошла ошибка, обратитесь к администратору')
+        await bot.send_message(message.chat.id, f'Либо вы сегодня не работали,\n'
+                                                f'либо произошла ошибка, обратитесь к администратору',
+                               reply_markup=markup_remove)
         await state.finish()
 
 
