@@ -31,9 +31,9 @@ import os
 # 3. Bot will work correctly if you create group and then add bot there
 
 bot_token = ''
-api_hash, api_id = '', 0
-group_id, manager_group_id = 0, 0
-chat_admins = [0, 0]
+api_hash, api_id = '', int
+group_id, manager_group_id = int, int
+chat_admins = []
 
 polls, projects_by_polls, polls_num, polls_close = {}, {}, {}, {}
 questions, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}
@@ -637,7 +637,8 @@ async def checking():
             report[key] = round(float(value), 2)
         else:
             report[key] = value
-    await bot.send_message(manager_group_id, f'{report}')
+    if report:
+        await bot.send_message(manager_group_id, f'{report}')
     if lost_names:
         await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту')
     report, lost_names = {}, []
@@ -678,7 +679,7 @@ async def get_period_stats(message: types.Message, state: FSMContext):
     except PermissionError:
         # Error if your doc is opened on server
         await bot.send_message(message.chat.id, 'Файл статистики открыт на сервере. \n'
-                                                'Попросите администратора закрыть файл')
+                                                'Попросите администратора закрыть файл и введите команду заново')
         await state.finish()
     except (IndexError, ValueError):
         # Error if user input wrong data
@@ -738,12 +739,12 @@ async def new_user_joined(message: types.Message):
         for new_member in message.new_chat_members:
             if new_member.id not in workers_in_db:
                 chat_members.append(new_member.id)
-                await greetings(new_member.id)
+                await greetings(new_member.username)
 
 
-async def greetings(new_member_id):
+async def greetings(new_member_username):
     global group_id
-    await bot.send_message(group_id, f"User_id {new_member_id} \n"
+    await bot.send_message(group_id, f"@{new_member_username} \n"
                                      f"Вас добавили в рабочую группу, откройте чат с ботом @FTE_tracker_bot"
                                      f" и нажмите кнопку 'Старт', чтобы он мог получать от вас данные")
 
