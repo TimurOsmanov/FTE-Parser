@@ -128,7 +128,7 @@ def check_answers():
     global report, lost_names
     get_workers_names()
     with sqlite3.connect('sqlite_python.db') as conn6:
-        now = f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'f'{datetime.datetime.now().day}'
+        now = datetime.datetime.now().strftime("%Y-%m-%d")
         cursor6 = conn6.cursor()
         select_info = f"SELECT user_id, SUM(hours) FROM FTE_info WHERE date = '{now}' GROUP BY user_id"
         cursor6.execute(select_info)
@@ -607,7 +607,7 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
             data['answer'] = message.text
         hours = data['answer']
         worker_daily_stat += 1
-        now = f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'f'{datetime.datetime.now().day}'
+        now = datetime.datetime.now().strftime("%Y-%m-%d")
         data_tuple = (worker_daily_stat, now, questions[message.chat.id], message.chat.id, hours.replace(',', '.'))
         try:
             insert_into_db(data_tuple)
@@ -647,9 +647,9 @@ async def checking():
 @dp.message_handler(commands=['period_stat'])
 async def get_period_stats(message: types.Message):
     if message.from_user.id in chat_admins:
-        await bot.send_message(message.chat.id, 'Укажите период в формате: 2022-8-3/2022-9-10 \n'
+        await bot.send_message(message.chat.id, 'Укажите период в формате: 2022-08-03/2022-09-10 \n'
                                                 '(первой идет более ранняя дата).\n'
-                                                'Если нужна статистика за 1 день - 2022-8-3/2022-8-3')
+                                                'Если нужна статистика за 1 день - 2022-08-03/2022-08-03')
         await Form.get_period_stat.set()
     else:
         await bot.send_message(message.chat.id, 'Нет прав')
@@ -692,14 +692,13 @@ async def monthly_checking():
     now = datetime.date(y, m, d)
     if d == 1:
         if m == 1:
-            first_d_of_previous_m = datetime.date(y - 1, 12, 1)
+            first_d_of_previous_m = datetime.date(y - 1, 12, 1).strftime("%Y-%m-%d")
+            last_d_of_previous_m = datetime.date(y - 1, 12, 31).strftime("%Y-%m-%d")
         else:
             first_d_of_previous_m = datetime.date(y, m - 1, 1)
-        delta = abs((now - first_d_of_previous_m).days)
-        first_d_of_previous_m = f'{first_d_of_previous_m.year}-{first_d_of_previous_m.month}-' \
-                                f'{first_d_of_previous_m.day}'
-        last_d_of_previous_m = datetime.date(y, m - 1, delta)
-        last_d_of_previous_m = f'{last_d_of_previous_m.year}-{last_d_of_previous_m.month}-{last_d_of_previous_m.day}'
+            delta = abs((now - first_d_of_previous_m).days)
+            first_d_of_previous_m = first_d_of_previous_m.strftime("%Y-%m-%d")
+            last_d_of_previous_m = datetime.date(y, m - 1, delta).strftime("%Y-%m-%d")
         try:
             name_excel = f'monthly_stat_{first_d_of_previous_m}_{last_d_of_previous_m}.xlsx'
             get_stat_by_period_excel((first_d_of_previous_m, last_d_of_previous_m), name_excel)
@@ -797,7 +796,7 @@ async def msg_update(message: types.Message, state: FSMContext):
         try:
             projects = get_projects_names(message.chat.id)
             if message_update[0] in projects:
-                now = f'{datetime.datetime.now().year}-{datetime.datetime.now().month}-'f'{datetime.datetime.now().day}'
+                now = datetime.datetime.now().strftime("%Y-%m-%d")
                 data_tuple = (message_update[1], message.chat.id, now, message_update[0])
                 update_in_fte_info(data_tuple)
                 await bot.send_message(message.chat.id, f'Часы работы на проекте {message_update[0]} обновлены')
