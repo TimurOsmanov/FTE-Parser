@@ -2,8 +2,9 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.utils.exceptions import PollHasAlreadyBeenClosed
+from aiogram.utils.exceptions import PollHasAlreadyBeenClosed, BotBlocked
 from aiogram.dispatcher.filters import Text
+from aiogram.utils import exceptions
 from pyrogram import Client
 import datetime
 import aioschedule
@@ -29,6 +30,8 @@ import os
 bot_token = ''
 api_hash, api_id = '', 0
 group_id, manager_group_id = 0, 0
+# if your group became supergroup you can find your group id in web tg but you have to add
+# 100 before id from web tg
 chat_admins, chat_managers = [], []
 
 polls, projects_by_polls, polls_num, polls_close = {}, {}, {}, {}
@@ -109,14 +112,26 @@ except sqlite3.Error as error_workers_info_exists:
     if error_workers_info_exists.args == ('table workers_info already exists',):
         print(f"Напоминаю, таблица уже создана {error_workers_info_exists}")
 
+try:
+    with sqlite3.connect('sqlite_python.db') as conn4:
+        cursor4 = conn4.cursor()
+        create_table2 = '''CREATE TABLE projects_info (project_id INTEGER PRIMARY KEY, project_name text, 
+        project_status integer)'''
+        cursor4.execute(create_table2)
+except sqlite3.Error as error_projects_info_exists:
+    # error_workers_info_exists.args ('table projects_info already exists',)
+    # is a system message when your DB already has table
+    if error_projects_info_exists.args == ('table projects_info already exists',):
+        print(f"Напоминаю, таблица уже создана {error_projects_info_exists}")
+
 
 def get_workers_names():
     global workers_in_db
-    with sqlite3.connect('sqlite_python.db') as conn4:
-        cursor4 = conn4.cursor()
+    with sqlite3.connect('sqlite_python.db') as conn5:
+        cursor5 = conn5.cursor()
         select_info = 'SELECT user_id, full_name FROM workers_info'
-        cursor4.execute(select_info)
-        names = cursor4.fetchall()
+        cursor5.execute(select_info)
+        names = cursor5.fetchall()
     workers_in_db = {user[0]: user[1] for user in names}
 
 
@@ -125,33 +140,31 @@ get_workers_names()
 
 def insert_into_db(data_tuple):
     # Function inserts new record according to new answer in poll
-    with sqlite3.connect('sqlite_python.db') as conn5:
-        cursor5 = conn5.cursor()
+    with sqlite3.connect('sqlite_python.db') as conn6:
+        cursor6 = conn6.cursor()
         insert_info = '''INSERT INTO FTE_info (unique_id, date, project, 
         user_id, hours) VALUES (?, ?, ?, ?, ?)'''
-        cursor5.execute(insert_info, data_tuple)
+        cursor6.execute(insert_info, data_tuple)
 
 
 def check_answers():
     global report, lost_names, workers_in_db
     get_workers_names()
-    with sqlite3.connect('sqlite_python.db') as conn6:
+    with sqlite3.connect('sqlite_python.db') as conn7:
         now = datetime.datetime.now() - datetime.timedelta(days=1)
         now = now.strftime("%Y-%m-%d")
-        cursor6 = conn6.cursor()
+        cursor7 = conn7.cursor()
         select_info = f"SELECT user_id, SUM(hours) FROM FTE_info WHERE date = '{now}' GROUP BY user_id"
-        cursor6.execute(select_info)
-        daily_stat_raw = cursor6.fetchall()
+        cursor7.execute(select_info)
+        daily_stat_raw = cursor7.fetchall()
     daily_stat = {user[0]: user[1] for user in daily_stat_raw}
     for worker in chat_members:
         try:
-            if worker not in report:
-                if worker in daily_stat:
-                    if not 6 <= daily_stat[worker] <= 12:
-                        report[workers_in_db[worker]] = daily_stat[worker]
-                else:
-                    if workers_in_db[worker] not in report:
-                        report[workers_in_db[worker]] = 'Не ответил/не работал'
+            if worker in daily_stat:
+                report[workers_in_db[worker]] = daily_stat[worker]
+            else:
+                if workers_in_db[worker] not in report:
+                    report[workers_in_db[worker]] = 'Не ответил/не работал'
         except KeyError:
             # KeyError raises when worker is in chat_members (in group) but he isn't in DB
             # It could happen if he forget to provide his full name to bot
@@ -159,34 +172,34 @@ def check_answers():
 
 
 def add_new_member_to_workers_info(data_tuple):
-    with sqlite3.connect('sqlite_python.db') as conn7:
-        cursor7 = conn7.cursor()
+    with sqlite3.connect('sqlite_python.db') as conn8:
+        cursor8 = conn8.cursor()
         insert_info = '''INSERT INTO workers_info (user_id, full_name) VALUES (?, ?)'''
-        cursor7.execute(insert_info, data_tuple)
+        cursor8.execute(insert_info, data_tuple)
 
 
 def get_projects_names(user_id):
-    with sqlite3.connect('sqlite_python.db') as conn8:
-        cursor8 = conn8.cursor()
+    with sqlite3.connect('sqlite_python.db') as conn9:
+        cursor9 = conn9.cursor()
         select_info = f"SELECT project FROM FTE_info WHERE user_id = '{user_id}'"
-        cursor8.execute(select_info)
-        names = cursor8.fetchall()
+        cursor9.execute(select_info)
+        names = cursor9.fetchall()
     names = [x[0] for x in names]
     return names
 
 
 def update_in_fte_info(data_tuple):
-    with sqlite3.connect('sqlite_python.db') as conn9:
-        cursor9 = conn9.cursor()
-        insert_info = f"""UPDATE FTE_info SET hours = '{data_tuple[0]}' WHERE user_id = '{data_tuple[1]}' 
+    with sqlite3.connect('sqlite_python.db') as conn10:
+        cursor10 = conn10.cursor()
+        update_info = f"""UPDATE FTE_info SET hours = '{data_tuple[0]}' WHERE user_id = '{data_tuple[1]}' 
         AND date = '{data_tuple[2]}' AND project = '{data_tuple[3]}'"""
-        cursor9.execute(insert_info)
+        cursor10.execute(update_info)
 
 
 def get_data_for_excel(col1, col2, period):
-    with sqlite3.connect('sqlite_python.db') as conn10:
-        cursor10 = conn10.cursor()
-        insert_info = f"""
+    with sqlite3.connect('sqlite_python.db') as conn11:
+        cursor11 = conn11.cursor()
+        get_info = f"""
         with final_table as (select distinct {col1}, {col2}, sum(hours) over (partition by {col1}, {col2}) as hours,
         (sum(hours) over (partition by {col1}, {col2}) / sum(hours) over (partition by {col1})) as percent from fte_info 
         inner join workers_info using(user_id)
@@ -215,21 +228,89 @@ def get_data_for_excel(col1, col2, period):
         select {col1}, {col2}, round(hours, 2), round(percent, 2), days from final 
         left join days_table using({col1}, {col2})
         order by 1, 2 """
-        cursor10.execute(insert_info)
-        data = cursor10.fetchall()
+        cursor11.execute(get_info)
+        data = cursor11.fetchall()
     return data
 
 
 def get_info_for_update():
-    with sqlite3.connect('sqlite_python.db') as conn11:
-        cursor11 = conn11.cursor()
-        info = """select distinct user_id, full_name from fte_info inner join workers_info using(user_id)"""
-        cursor11.execute(info)
-        users = cursor11.fetchall()
-        info2 = """select distinct project from fte_info"""
-        cursor11.execute(info2)
-        projects = cursor11.fetchall()
+    with sqlite3.connect('sqlite_python.db') as conn12:
+        cursor12 = conn12.cursor()
+        info = """select distinct * from workers_info"""
+        cursor12.execute(info)
+        users = cursor12.fetchall()
+        info2 = """select distinct project_name from projects_info where project_status = 1"""
+        cursor12.execute(info2)
+        projects = cursor12.fetchall()
     return users, projects
+
+
+def get_new_project_id():
+    with sqlite3.connect('sqlite_python.db') as conn13:
+        cursor13 = conn13.cursor()
+        select_info = 'SELECT project_id FROM projects_info'
+        cursor13.execute(select_info)
+        number = cursor13.fetchall()
+    try:
+        return number[-1][0]
+    except IndexError:
+        return 0
+
+
+def add_new_project(data_tuple):
+    with sqlite3.connect('sqlite_python.db') as conn14:
+        cursor14 = conn14.cursor()
+        select_info = 'insert into projects_info values (?, ?, ?)'
+        cursor14.execute(select_info, data_tuple)
+
+
+def get_projects_list():
+    with sqlite3.connect('sqlite_python.db') as conn15:
+        cursor15 = conn15.cursor()
+        select_info = 'select project_name from projects_info'
+        cursor15.execute(select_info)
+        projects = cursor15.fetchall()
+        return projects
+
+
+def get_active_projects_list():
+    with sqlite3.connect('sqlite_python.db') as conn15:
+        cursor15 = conn15.cursor()
+        select_info = 'select distinct project_name from projects_info where project_status = 1'
+        cursor15.execute(select_info)
+        projects = cursor15.fetchall()
+        return projects
+
+
+def update_project_status(project, status):
+    with sqlite3.connect('sqlite_python.db') as conn16:
+        cursor16 = conn16.cursor()
+        update_info = f"update projects_info set project_status = {status} where project_name = '{project}'"
+        cursor16.execute(update_info)
+
+
+def delete_worker(workers_id):
+    with sqlite3.connect('sqlite_python.db') as conn17:
+        cursor17 = conn17.cursor()
+        delete_info = f"delete from workers_info where user_id = {workers_id}"
+        cursor17.execute(delete_info)
+
+
+def get_active_projects_groups():
+    all_projects = sorted(list(map(lambda x: x[0].strip(), get_active_projects_list())))
+    all_projects_div = []
+    temp, i = [], 0
+    while i - len(all_projects) != 0:
+        temp.append(all_projects[i])
+        i += 1
+        if i % 9 == 0:
+            temp.append('Не участвовал в вышеперечисленных проектах')
+            all_projects_div.append(temp)
+            temp = []
+    if temp:
+        temp.append('Не участвовал в вышеперечисленных проектах')
+        all_projects_div.append(temp)
+    return all_projects_div
 
 
 # Export documents functions
@@ -259,6 +340,8 @@ def get_stat_by_period_excel(period, name):
 class Form(StatesGroup):
     project = State()
     project_name = State()
+    project_status_stop = State()
+    project_status_restart = State()
     answer = State()
     final_answer = State()
     final_answer2 = State()
@@ -275,20 +358,26 @@ async def create_polls():
     polls, polls_num, projects_by_polls, question_index, polls_close = {}, {}, {}, {}, {}
     report, chosen_projects, questions = {}, {}, {}
     lost_names = []
-    reminder_index = 0
+    projects_set_by_admin_div = get_active_projects_groups()
     for user in chat_members:
         i = -1
         for group_projects in projects_set_by_admin_div:
-            new_poll = await bot.send_poll(user, 'В каких проектах вы принимали участие вчера?',
-                                           group_projects, is_anonymous=False, allows_multiple_answers=True)
-            polls[new_poll.poll.id] = group_projects
-            if new_poll.chat.id not in polls_close:
-                polls_close[new_poll.chat.id] = {new_poll.poll.id: [new_poll.message_id, i + 1]}
-                i += 1
-            else:
-                polls_close[new_poll.chat.id][new_poll.poll.id] = [new_poll.message_id, i + 1]
-                i += 1
-        await bot.send_message(user, 'Если у вас выходной, для завершения опроса используйте команду /close_polls.')
+            try:
+                new_poll = await bot.send_poll(user, 'В каких проектах вы принимали участие вчера?',
+                                               group_projects, is_anonymous=False, allows_multiple_answers=True)
+                polls[new_poll.poll.id] = group_projects
+                if new_poll.chat.id not in polls_close:
+                    polls_close[new_poll.chat.id] = {new_poll.poll.id: [new_poll.message_id, i + 1]}
+                    i += 1
+                else:
+                    polls_close[new_poll.chat.id][new_poll.poll.id] = [new_poll.message_id, i + 1]
+                    i += 1
+            except BotBlocked:
+                for admin in chat_admins:
+                    await bot.send_message(admin, f'{user} заблокировал бота')
+            except exceptions.CantInitiateConversation:
+                for admin in chat_admins:
+                    await bot.send_message(admin, f'{user} не начал диалог с ботом')
 
 
 async def clean_folder():
@@ -325,7 +414,7 @@ async def checking():
     global report, lost_names, reminder_index
     reminder_index += 1
     check_answers()
-    if reminder_index == 1:
+    if reminder_index == 11:
         for key, value in report.items():
             if isinstance(value, float):
                 report[key] = round(float(value), 2)
@@ -338,7 +427,10 @@ async def checking():
                 worker = worker.replace("'", "")
                 if isinstance(status, str):
                     status = status.replace("'", "")
-                checking_report += str(num + 1) + '. ' + worker + ': ' + str(status) + '\n'
+                    checking_report += str(num + 1) + '. ' + worker + ': ' + str(status) + '\n'
+                else:
+                    if not 6 <= status <= 12:
+                        checking_report += str(num + 1) + '. ' + worker + ': ' + str(status) + '\n'
             await bot.send_message(manager_group_id, checking_report)
         if lost_names:
             await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту.')
@@ -346,15 +438,22 @@ async def checking():
         workers_in_db_rev = {value: key for key, value in workers_in_db.items()}
         if any([worker_hours == 'Не ответил/не работал' for worker_hours in report.values()]):
             for worker in [worker for worker in report if report[worker] == 'Не ответил/не работал']:
-                await bot.send_message(workers_in_db_rev[worker], 'Вы забыли ответить на опросы, '
-                                                                  'вам необходимо на них ответить.')
+                try:
+                    await bot.send_message(workers_in_db_rev[worker], 'Вы забыли ответить на опросы, '
+                                                                      'вам необходимо на них ответить.')
+                except BotBlocked:
+                    pass
 
 
 async def close_all_polls():
-    global polls_close
+    global polls_close, reminder_index
+    reminder_index = 0
     for worker in polls_close:
         for poll in polls_close[worker]:
-            await bot.stop_poll(worker, polls_close[worker][poll][0])
+            try:
+                await bot.stop_poll(worker, polls_close[worker][poll][0])
+            except PollHasAlreadyBeenClosed:
+                pass
 
 
 # Cancel command is available for all types of users at any step of conversation
@@ -369,7 +468,7 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-# Cancel command is available for all types of users at any step of conversation
+# close_polls command is available for all types of users at any step of conversation
 @dp.message_handler(state='*', commands=['close_polls'])
 @dp.message_handler(Text(equals='close_polls', ignore_case=True), state='*')
 async def close_polls(message: types.Message, state: FSMContext):
@@ -382,45 +481,105 @@ async def close_polls(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-@dp.message_handler(commands=['set_projects'])
-async def set_projects(message: types.Message):
+@dp.message_handler(commands=['add_project_projects'])
+async def add_project_projects_tg(message: types.Message):
     global chat_admins
     if message.from_user.id in chat_admins:
-        await message.reply("Перечислите проекты через запятую.")
-        await Form.project.set()
+        await message.reply("Перечислите проект/проекты, по которым идет учет времени работы.")
+        await Form.project_name.set()
     else:
         await bot.send_message(message.chat.id, 'Нет прав.')
 
 
-@dp.message_handler(state=Form.project)
-async def admin_set_projects(message: types.Message, state: FSMContext):
+@dp.message_handler(state=Form.project_name)
+async def add_project_projects(message: types.Message, state: FSMContext):
     global projects_set_by_admin, projects_set_by_admin_div
-    projects_set_by_admin, projects_set_by_admin_div = [], []
     async with state.proxy() as data:
         data['project_name'] = message.text
     projects_set_by_admin = data['project_name'].split(',')
     projects_set_by_admin = list(map(lambda x: x.strip(), projects_set_by_admin))
-    if all(projects_set_by_admin):
-        temp, i = [], 0
-        while i - len(projects_set_by_admin) != 0:
-            temp.append(projects_set_by_admin[i])
-            i += 1
-            if i % 9 == 0:
-                temp.append('Не участвовал в вышеперечисленных проектах')
-                projects_set_by_admin_div.append(temp)
-                temp = []
-        if temp:
-            temp.append('Не участвовал в вышеперечисленных проектах')
-            projects_set_by_admin_div.append(temp)
-        await state.finish()
+    projects_set_by_admin = list(set(projects_set_by_admin))
+    new_project_id = get_new_project_id() + 1
+    all_projects = list(map(lambda x: x[0].strip(), get_projects_list()))
+    try:
+        for project_name in projects_set_by_admin:
+            if project_name not in all_projects:
+                add_new_project((new_project_id, project_name, 1))
+                new_project_id += 1
+        await bot.send_message(message.chat.id, 'Проект/проекты внесены в базу')
+    except sqlite3.OperationalError as error_add_status:
+        # error_final_answer2.args ('database is locked',) is a system message when your DB is opened by someone
+        if error_add_status.args == ('database is locked',):
+            await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
+                                                    'администратора закрыть ее и отправьте данные заново.')
+    await state.finish()
+
+
+@dp.message_handler(commands=['stop_project_projects'])
+async def stop_project_projects_tg(message: types.Message):
+    global chat_admins
+    if message.from_user.id in chat_admins:
+        await message.reply("Укажите (без скобок, через запятую) проект/проекты, "
+                            "по которым завершен учет времени работы.\nНазвания проектов из базы указаны ниже.")
+        projects_mes = '\n'.join([x[0] for x in sorted(get_projects_list())])
+        await bot.send_message(message.chat.id, projects_mes)
+        await Form.project_status_stop.set()
     else:
-        await bot.send_message(message.chat.id, 'Вы ввели некорректную информацию, попробуйте заново.')
+        await bot.send_message(message.chat.id, 'Нет прав.')
+
+
+@dp.message_handler(state=Form.project_status_stop)
+async def stop_project_projects(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['project_status_stop'] = message.text
+    projects_to_update = data['project_status_stop'].split(',')
+    projects_to_update = list(map(lambda x: x.strip(), projects_to_update))
+    try:
+        for project in projects_to_update:
+            update_project_status(project, 0)
+        await bot.send_message(message.chat.id, 'Статусы обновлены')
+    except sqlite3.OperationalError as error_update_status:
+        # error_final_answer2.args ('database is locked',) is a system message when your DB is opened by someone
+        if error_update_status.args == ('database is locked',):
+            await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
+                                                    'администратора закрыть ее и отправьте данные заново.')
+    await state.finish()
+
+
+@dp.message_handler(commands=['restart_project_projects'])
+async def restart_project_projects_tg(message: types.Message):
+    global chat_admins
+    if message.from_user.id in chat_admins:
+        await message.reply("Укажите (без скобок, через запятую) проект/проекты, "
+                            "по которым возобновлен учет времени работы.\nНазвания проектов из базы указаны ниже.")
+        projects_mes = '\n'.join([x[0] for x in sorted(get_projects_list())])
+        await bot.send_message(message.chat.id, projects_mes)
+        await Form.project_status_restart.set()
+    else:
+        await bot.send_message(message.chat.id, 'Нет прав.')
+
+
+@dp.message_handler(state=Form.project_status_restart)
+async def restart_project_projects(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['project_status_restart'] = message.text
+    projects_to_update = data['project_status_restart'].split(',')
+    projects_to_update = list(map(lambda x: x.strip(), projects_to_update))
+    try:
+        for project in projects_to_update:
+            update_project_status(project, 1)
+        await bot.send_message(message.chat.id, 'Статусы обновлены')
+    except sqlite3.OperationalError as error_update_status:
+        # error_final_answer2.args ('database is locked',) is a system message when your DB is opened by someone
+        if error_update_status.args == ('database is locked',):
+            await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
+                                                    'администратора закрыть ее и отправьте данные заново.')
+    await state.finish()
 
 
 @dp.message_handler(commands=['send_polls'])
 async def send_polls(message: types.Message):
     global chat_admins, reminder_index
-    await create_polls()
     if message.from_user.id in chat_admins:
         aioschedule.every().day.at('09:00').do(create_polls)
         aioschedule.every().day.at('09:30').do(monthly_checking)
@@ -480,8 +639,7 @@ async def voting(call):
                     projects_by_polls[call.user.id][call.poll_id].append(polls[call.poll_id][project_num])
         if polls_num[call.user.id] == 0:
             chosen_projects[call.user.id] = [pr for poll in projects_by_polls[call.user.id]
-                                             for pr in projects_by_polls[call.user.id][poll]
-                                             if pr != 'Не участвовал в вышеперечисленных проектах']
+                                             for pr in projects_by_polls[call.user.id][poll]]
             markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
             markup.add("Продолжить")
             await bot.send_message(call.user.id, "Нажмите продолжить", reply_markup=markup)
@@ -490,7 +648,7 @@ async def voting(call):
 
 @dp.message_handler(lambda message: message.text in ["Продолжить"], state=Form.final_answer)
 async def create_questions_from_polls(message: types.Message, state: FSMContext):
-    global question_index, chosen_projects, polls_close
+    global question_index, chosen_projects, polls_close, report, projects_set_by_admin_div
     markup_remove = types.ReplyKeyboardRemove()
     for poll_to_close in polls_close[message.chat.id]:
         try:
@@ -498,18 +656,29 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
         except PollHasAlreadyBeenClosed:
             pass
     question_index[message.chat.id] = 0
-    try:
-        project = chosen_projects[message.chat.id][question_index[message.chat.id]]
-        await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?',
-                               reply_markup=markup_remove)
-        questions[message.chat.id] = project
-        question_index[message.chat.id] += 1
-        await Form.final_answer2.set()
-    except IndexError:
-        await bot.send_message(message.chat.id, f'Либо вы сегодня не работали,\n'
-                                                f'либо произошла ошибка, обратитесь к администратору.',
+    if chosen_projects[message.chat.id] == ['Не участвовал в вышеперечисленных проектах'] \
+            * len(projects_set_by_admin_div):
+        report[workers_in_db[message.chat.id]] = 0
+
+        await bot.send_message(message.chat.id, f'Спасибо, ваши данные (о том, что вы не участвовали на проектах вчера)'
+                                                f' учтены.',
                                reply_markup=markup_remove)
         await state.finish()
+    else:
+        try:
+            chosen_projects[message.chat.id] = [pr for pr in chosen_projects[message.chat.id]
+                                                if pr != 'Не участвовал в вышеперечисленных проектах']
+            project = chosen_projects[message.chat.id][question_index[message.chat.id]]
+            await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?',
+                                   reply_markup=markup_remove)
+            questions[message.chat.id] = project
+            question_index[message.chat.id] += 1
+            await Form.final_answer2.set()
+        except IndexError:
+            await bot.send_message(message.chat.id, f'Либо вы сегодня не работали,\n'
+                                                    f'либо произошла ошибка, обратитесь к администратору.',
+                                   reply_markup=markup_remove)
+            await state.finish()
 
 
 @dp.message_handler(lambda message: message.text not in ["Продолжить"], state=Form.final_answer)
@@ -564,8 +733,8 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
 async def greetings_manager(new_member_username):
     global manager_group_id
     await bot.send_message(manager_group_id, f"@{new_member_username} \n"
-                                             f"Вас добавили в группу менеджеров, откройте чат с ботом @FTE_tracker_bot"
-                                             f" и нажмите кнопку 'Старт', чтобы он мог получать от вас данные.")
+                                             f"Вас добавили в группу менеджеров, теперь у вас есть доступ к командам "
+                                             f"/period_stat, /update_by_manager")
 
 
 @dp.message_handler(commands=['period_stat'])
@@ -613,13 +782,14 @@ async def update_by_manager(message: types.Message):
     if message.from_user.id in chat_admins or message.from_user.id in chat_managers:
         await bot.send_message(message.chat.id, 'Для внесения пропущенной записи в базу укажите через запятую:\n'
                                                 '1. Дата в формате 2022-08-03 (ГГГГ-ММ-ДД),\n'
-                                                '2. Название проекта\n'
-                                                '3. ID сотрудника (в следующих сообщениях - список имен в формате '
-                                                '(ID сотрудника, имя сотрудника), проектов, указывать без кавычек)\n'
+                                                '2. ID сотрудника\n'
+                                                '3. Название проекта\n'
                                                 '4. Количество часов в формате 4.5 (4 часа 30 минут).')
         users, projects = get_info_for_update()
-        await bot.send_message(message.chat.id, users)
-        await bot.send_message(message.chat.id, projects)
+        users_mes = '\n'.join([f'{x[0]} {x[1]}' for x in users])
+        projects_mes = '\n'.join([x[0] for x in sorted(projects)])
+        await bot.send_message(message.chat.id, users_mes)
+        await bot.send_message(message.chat.id, projects_mes)
         await Form.update_by_manager.set()
     else:
         await bot.send_message(message.chat.id, 'Нет прав.')
@@ -628,16 +798,17 @@ async def update_by_manager(message: types.Message):
 @dp.message_handler(state=Form.update_by_manager)
 async def update_by_manager(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
-        data['get_period_stat'] = message.text
+        data['update_by_manager'] = message.text
     try:
-        date, project, user_id, hours = [x.strip() for x in data['get_period_stat'].split(',')]
+        date, user_id, project, hours = [x.strip() for x in data['update_by_manager'].split(',')]
         unique_id = get_worker_daily_stat() + 1
-        hours = hours.replace(',', '').replace('.', '')
-        if not hours.isdigit():
+        replaced_message_text = hours.replace(',', '').replace('.', '')
+
+        if not replaced_message_text.isdigit():
             await bot.send_message(message.chat.id, f'Ответ должен быть числом, напишите количество часов заново.')
             await Form.update_by_manager.set()
         else:
-            insert_into_db((unique_id, date, project, user_id, hours))
+            insert_into_db((unique_id, date, project, user_id, hours.replace(',', '.')))
             await bot.send_message(message.chat.id, 'Запись успешно внесена в базу данных.')
             await state.finish()
     except sqlite3.OperationalError as error_message_update:
@@ -687,10 +858,12 @@ async def user_fired(message: types.Message):
     if message.chat.id == group_id:
         if message.left_chat_member.id in chat_members:
             chat_members.remove(message.left_chat_member.id)
+            delete_worker(message.left_chat_member.id)
 
     if message.chat.id == manager_group_id:
         if message.left_chat_member.id in chat_managers:
             chat_managers.remove(message.left_chat_member.id)
+            delete_worker(message.left_chat_member.id)
 
 
 @dp.message_handler(commands=['start'])
@@ -756,6 +929,12 @@ async def msg_update(message: types.Message, state: FSMContext):
                 await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
                                                         'администратора выйти из нее и отправьте команду заново.')
                 await state.finish()
+
+
+@dp.errors_handler(exception=BotBlocked)
+async def function_name(exception: BotBlocked):
+    print('Бот заблокирован юзером')
+    return True
 
 
 if __name__ == '__main__':
