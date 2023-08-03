@@ -5,6 +5,7 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils.exceptions import PollHasAlreadyBeenClosed, BotBlocked
 from aiogram.dispatcher.filters import Text
 from aiogram.utils import exceptions
+from aiogram.types import AllowedUpdates
 from pyrogram import Client
 import datetime
 import aioschedule
@@ -37,7 +38,6 @@ chat_admins, chat_managers = [], []
 polls, projects_by_polls, polls_num, polls_close = {}, {}, {}, {}
 questions, chosen_projects, question_index, report, workers_in_db = {}, {}, {}, {}, {}
 projects_set_by_admin, projects_set_by_admin_div, chat_members, lost_names = [], [], [], []
-reminder_index = 0
 
 bot = Bot(bot_token)
 storage = MemoryStorage()
@@ -167,8 +167,9 @@ def check_answers():
                     report[workers_in_db[worker]] = 'Не ответил/не работал'
         except KeyError:
             # KeyError raises when worker is in chat_members (in group) but he isn't in DB
-            # It could happen if he forget to provide his full name to bot
-            lost_names.append(worker)
+            # It could happen if he forgot to provide his full name to bot
+            if worker not in lost_names:
+                lost_names.append(worker)
 
 
 def add_new_member_to_workers_info(data_tuple):
@@ -354,10 +355,10 @@ class Form(StatesGroup):
 
 async def create_polls():
     global projects_set_by_admin_div, chat_members, polls, polls_num, projects_by_polls, question_index, polls_close, \
-        reminder_index, report, lost_names, chosen_projects, questions
+        report, lost_names, chosen_projects, questions
     polls, polls_num, projects_by_polls, question_index, polls_close = {}, {}, {}, {}, {}
     report, chosen_projects, questions = {}, {}, {}
-    lost_names = []
+    lost_names, blocked, not_started = [], [], []
     projects_set_by_admin_div = get_active_projects_groups()
     for user in chat_members:
         i = -1
@@ -373,11 +374,18 @@ async def create_polls():
                     polls_close[new_poll.chat.id][new_poll.poll.id] = [new_poll.message_id, i + 1]
                     i += 1
             except BotBlocked:
-                for admin in chat_admins:
-                    await bot.send_message(admin, f'{user} заблокировал бота')
+                if user not in blocked:
+                    for admin in chat_admins:
+                        await bot.send_message(admin, f'{user} заблокировал бота, {user} удален из рассылки '
+                                                      f'и базы данных')
+                    blocked.append(user)
+                    chat_members.remove(user)
+                    delete_worker(user)
             except exceptions.CantInitiateConversation:
-                for admin in chat_admins:
-                    await bot.send_message(admin, f'{user} не начал диалог с ботом')
+                if user not in not_started:
+                    for admin in chat_admins:
+                        await bot.send_message(admin, f'{user} не начал диалог с ботом')
+                    not_started.append(user)
 
 
 async def clean_folder():
@@ -389,7 +397,6 @@ async def clean_folder():
 
 async def monthly_checking():
     y, m, d = datetime.datetime.now().year, datetime.datetime.now().month, datetime.datetime.now().day
-    # d = 1 for test
     now = datetime.date(y, m, d)
     if d == 1:
         last_d_of_previous_m = now - datetime.timedelta(days=1)
@@ -410,11 +417,10 @@ async def monthly_checking():
                                                      'Попросите администратора закрыть файлы и выслать вам их вручную.')
 
 
-async def checking():
-    global report, lost_names, reminder_index
-    reminder_index += 1
+async def checking(notification):
+    global report, lost_names
     check_answers()
-    if reminder_index == 11:
+    if notification == 'yes':
         for key, value in report.items():
             if isinstance(value, float):
                 report[key] = round(float(value), 2)
@@ -422,15 +428,18 @@ async def checking():
                 report[key] = value
         if report:
             checking_report = 'Сведения о сотрудниках, которыe работали меньше 6 часов или больше 12:\n\n'
-            for num, worker_status in enumerate(report.items()):
+            num = 0
+            for worker_status in report.items():
                 worker, status = worker_status
                 worker = worker.replace("'", "")
                 if isinstance(status, str):
                     status = status.replace("'", "")
                     checking_report += str(num + 1) + '. ' + worker + ': ' + str(status) + '\n'
+                    num += 1
                 else:
                     if not 6 <= status <= 12:
                         checking_report += str(num + 1) + '. ' + worker + ': ' + str(status) + '\n'
+                        num += 1
             await bot.send_message(manager_group_id, checking_report)
         if lost_names:
             await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту.')
@@ -446,8 +455,7 @@ async def checking():
 
 
 async def close_all_polls():
-    global polls_close, reminder_index
-    reminder_index = 0
+    global polls_close
     for worker in polls_close:
         for poll in polls_close[worker]:
             try:
@@ -579,30 +587,30 @@ async def restart_project_projects(message: types.Message, state: FSMContext):
 
 @dp.message_handler(commands=['send_polls'])
 async def send_polls(message: types.Message):
-    global chat_admins, reminder_index
+    global chat_admins
     if message.from_user.id in chat_admins:
         aioschedule.every().day.at('09:00').do(create_polls)
-        aioschedule.every().day.at('09:30').do(monthly_checking)
-        aioschedule.every().day.at('10:00').do(checking)
-        aioschedule.every().day.at('10:30').do(checking)
-        aioschedule.every().day.at('11:00').do(checking)
-        aioschedule.every().day.at('11:30').do(checking)
-        aioschedule.every().day.at('12:00').do(checking)
-        aioschedule.every().day.at('12:30').do(checking)
-        aioschedule.every().day.at('13:00').do(checking)
-        aioschedule.every().day.at('13:30').do(checking)
-        aioschedule.every().day.at('14:00').do(checking)
-        aioschedule.every().day.at('14:30').do(checking)
-        aioschedule.every().day.at('15:00').do(checking)
-        aioschedule.every().day.at('15:30').do(checking)
-        aioschedule.every().day.at('16:00').do(checking)
-        aioschedule.every().day.at('16:30').do(checking)
-        aioschedule.every().day.at('17:00').do(checking)
-        aioschedule.every().day.at('17:30').do(checking)
-        aioschedule.every().day.at('18:00').do(checking)
-        aioschedule.every().day.at('18:30').do(checking)
-        aioschedule.every().day.at('19:00').do(checking)
-        aioschedule.every().day.at('19:30').do(close_all_polls)
+        aioschedule.every().day.at('10:00').do(checking, notification='no')
+        aioschedule.every().day.at('10:30').do(checking, notification='no')
+        aioschedule.every().day.at('11:00').do(checking, notification='no')
+        aioschedule.every().day.at('11:30').do(checking, notification='no')
+        aioschedule.every().day.at('12:00').do(checking, notification='no')
+        aioschedule.every().day.at('12:30').do(checking, notification='no')
+        aioschedule.every().day.at('13:00').do(checking, notification='no')
+        aioschedule.every().day.at('13:30').do(checking, notification='no')
+        aioschedule.every().day.at('14:00').do(checking, notification='no')
+        aioschedule.every().day.at('14:30').do(checking, notification='no')
+        aioschedule.every().day.at('15:00').do(checking, notification='yes')
+        aioschedule.every().day.at('15:30').do(checking, notification='no')
+        aioschedule.every().day.at('16:00').do(checking, notification='no')
+        aioschedule.every().day.at('16:30').do(checking, notification='no')
+        aioschedule.every().day.at('17:00').do(checking, notification='no')
+        aioschedule.every().day.at('17:30').do(checking, notification='no')
+        aioschedule.every().day.at('18:00').do(checking, notification='no')
+        aioschedule.every().day.at('18:30').do(checking, notification='no')
+        aioschedule.every().day.at('19:00').do(checking, notification='no')
+        aioschedule.every().day.at('19:30').do(monthly_checking)
+        aioschedule.every().day.at('19:31').do(close_all_polls)
         while True:
             await aioschedule.run_pending()
             await asyncio.sleep(1)
@@ -716,6 +724,11 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
                     await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
                                                             'администратора закрыть ее и отправьте ответ заново.')
                     await Form.final_answer2.set()
+            except sqlite3.IntegrityError:
+                question_index[message.chat.id] -= 1
+                await bot.send_message(message.chat.id, 'Произошла ошибка (уникальный номер используется), '
+                                                        'введите данные заново')
+                await Form.final_answer2.set()
             try:
                 project = chosen_projects[message.chat.id][question_index[message.chat.id]]
                 await bot.send_message(message.chat.id, f'Сколько часов вы были заняты на проекте {project} вчера?')
@@ -728,13 +741,6 @@ async def create_questions_from_polls(message: types.Message, state: FSMContext)
 
 
 # MANAGER-PART
-
-
-async def greetings_manager(new_member_username):
-    global manager_group_id
-    await bot.send_message(manager_group_id, f"@{new_member_username} \n"
-                                             f"Вас добавили в группу менеджеров, теперь у вас есть доступ к командам "
-                                             f"/period_stat, /update_by_manager")
 
 
 @dp.message_handler(commands=['period_stat'])
@@ -817,53 +823,45 @@ async def update_by_manager(message: types.Message, state: FSMContext):
             await bot.send_message(message.chat.id, 'База данных используется в данный момент, попросите '
                                                     'администратора выйти из нее и отправьте команду заново.')
             await state.finish()
+    except sqlite3.IntegrityError:
+        await bot.send_message(message.chat.id, 'Произошла ошибка (уникальный номер используется), '
+                                                'введите данные заново')
+        await Form.update_by_manager.set()
 
 
 # USER-PART
 
 
-async def greetings(new_member_username):
-    global group_id
-    await bot.send_message(group_id, f"@{new_member_username} \n"
-                                     f"Вас добавили в рабочую группу, откройте чат с ботом @FTE_tracker_bot"
-                                     f" и нажмите кнопку 'Старт', чтобы он мог получать от вас данные.")
+@dp.chat_member_handler()
+async def chat_member_update_handler(chat_member: types.ChatMemberUpdated):
+    # bot have 2 be admin in needed groups
 
+    if chat_member.chat.id == group_id:
+        if chat_member.new_chat_member.status == 'kicked':
+            await bot.send_message(manager_group_id, f"@{chat_member.new_chat_member.user.username} \n"
+                                                     f"Сотрудник покинул рабочий чат.")
+            chat_members.remove(chat_member.new_chat_member.user.id)
+            delete_worker(chat_member.new_chat_member.user.id)
 
-@dp.message_handler(content_types=['new_chat_members'])
-async def new_user_joined(message: types.Message):
-    get_workers_names()
-    global group_id, chat_members, workers_in_db, manager_group_id
-    if message.chat.id == group_id:
-        for new_member in message.new_chat_members:
-            if new_member.id not in workers_in_db:
-                chat_members.append(new_member.id)
-                await greetings(new_member.username)
-            if new_member.id not in chat_members:
-                chat_members.append(new_member.id)
-                await greetings(new_member.username)
+        elif chat_member.new_chat_member.status == 'member':
+            await bot.send_message(group_id, f"@{chat_member.new_chat_member.user.username} \n"
+                                             f"Вас добавили в рабочую группу, откройте чат с ботом @FTE_tracker_bot"
+                                             f" и нажмите кнопку 'Старт', чтобы он мог получать от вас данные.")
+            chat_members.append(chat_member.new_chat_member.user.id)
 
-    if message.chat.id == manager_group_id:
-        for new_member in message.new_chat_members:
-            if new_member.id not in workers_in_db:
-                chat_managers.append(new_member.id)
-                await greetings_manager(new_member.username)
-            if new_member.id not in chat_managers:
-                chat_managers.append(new_member.id)
-                await greetings_manager(new_member.username)
+    elif chat_member.chat.id == manager_group_id:
+        if chat_member.new_chat_member.status == 'kicked':
+            await bot.send_message(manager_group_id, f"@{chat_member.new_chat_member.user.username} \n"
+                                                     f"Сотрудник (менеджер) покинул чат руководителей."
+                                                     f"Для удаления сотрудника из базы/рассылки "
+                                                     f"удалите его из рабочей группы.")
+            chat_managers.remove(chat_member.new_chat_member.user.id)
 
-
-@dp.message_handler(content_types=['left_chat_member'])
-async def user_fired(message: types.Message):
-    global chat_members, chat_managers, group_id, manager_group_id
-    if message.chat.id == group_id:
-        if message.left_chat_member.id in chat_members:
-            chat_members.remove(message.left_chat_member.id)
-            delete_worker(message.left_chat_member.id)
-
-    if message.chat.id == manager_group_id:
-        if message.left_chat_member.id in chat_managers:
-            chat_managers.remove(message.left_chat_member.id)
-            delete_worker(message.left_chat_member.id)
+        elif chat_member.new_chat_member.status == 'member':
+            await bot.send_message(manager_group_id, f"@{chat_member.new_chat_member.user.username} \n"
+                                                     f"Вас добавили в группу менеджеров, теперь у вас есть доступ к "
+                                                     f"командам /period_stat, /update_by_manager.")
+            chat_managers.append(chat_member.new_chat_member.user.id)
 
 
 @dp.message_handler(commands=['start'])
@@ -883,6 +881,7 @@ async def first_message_to_bot(message: types.Message, state: FSMContext):
             await bot.send_message(message.chat.id, 'Вы добавлены в базу.')
             await state.finish()
         else:
+            await bot.send_message(message.chat.id, 'Вы уже в базе.')
             await state.finish()
     except sqlite3.OperationalError as error_first_message:
         # error_first_message.args ('database is locked',) is a system message when your DB is opened by someone
@@ -931,11 +930,19 @@ async def msg_update(message: types.Message, state: FSMContext):
                 await state.finish()
 
 
-@dp.errors_handler(exception=BotBlocked)
-async def function_name(exception: BotBlocked):
-    print('Бот заблокирован юзером')
-    return True
-
-
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True,
+                           allowed_updates=AllowedUpdates.MESSAGE +
+                           AllowedUpdates.EDITED_MESSAGE +
+                           AllowedUpdates.CHANNEL_POST +
+                           AllowedUpdates.EDITED_CHANNEL_POST +
+                           AllowedUpdates.INLINE_QUERY +
+                           AllowedUpdates.CALLBACK_QUERY +
+                           AllowedUpdates.SHIPPING_QUERY +
+                           AllowedUpdates.PRE_CHECKOUT_QUERY +
+                           AllowedUpdates.POLL +
+                           AllowedUpdates.POLL_ANSWER +
+                           AllowedUpdates.MY_CHAT_MEMBER +
+                           AllowedUpdates.CHAT_MEMBER +
+                           AllowedUpdates.CHAT_JOIN_REQUEST
+                           )
