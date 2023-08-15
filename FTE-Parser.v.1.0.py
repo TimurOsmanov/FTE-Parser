@@ -374,7 +374,9 @@ async def create_polls():
     report, chosen_projects, questions = {}, {}, {}
     lost_names, blocked, not_started = [], [], []
     projects_set_by_admin_div = get_active_projects_groups()
+
     for user in chat_members:
+        await asyncio.sleep(1/2)
         i = -1
         for group_projects in projects_set_by_admin_div:
             try:
@@ -396,7 +398,8 @@ async def create_polls():
                         blocked.append(user)
                         chat_members.remove(user)
                         delete_worker(user)
-                elif error.__str__() == 'Telegram server says - Bad Request: chat not found':
+            except TelegramBadRequest as error:
+                if error.__str__() == 'Telegram server says - Bad Request: chat not found':
                     if user not in not_started:
                         for admin in chat_admins:
                             await bot.send_message(admin, f'{user} не начал диалог с ботом')
@@ -740,6 +743,8 @@ async def first_message_to_bot(message: types.Message, state: FSMContext):
             add_new_member_to_workers_info(data_tuple)
             await bot.send_message(message.chat.id, 'Вы добавлены в базу.')
             await state.clear()
+            if message.chat.id not in chat_members:
+                chat_members.append(message.chat.id)
         else:
             await bot.send_message(message.chat.id, 'Вы уже в базе.')
             await state.clear()
