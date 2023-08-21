@@ -407,7 +407,7 @@ async def create_polls():
 
 
 async def clean_folder():
-    files = [x for x in os.listdir(os.path.dirname(__file__)) if '.pdf' in x or '.png' in x or 'xlsx' in x]
+    files = [x for x in os.listdir(os.path.dirname(__file__)) if 'xlsx' in x]
     for file in files:
         path = os.path.join(os.path.abspath(os.path.dirname(__file__)), file)
         os.remove(path)
@@ -446,7 +446,6 @@ async def checking(notification):
             else:
                 report[key] = value
         if report:
-            print(report)
             ch_report = 'Сведения о сотрудниках, которыe работали меньше 6 часов или больше 12:\n\n'
             num = 0
             for worker_status in report.items():
@@ -456,12 +455,16 @@ async def checking(notification):
                 t_id = str(t_id.user.username)
                 if isinstance(status, str):
                     status = status.replace("'", "")
-                    ch_report += str(num + 1) + '. ' + worker + ' @' + t_id + ' : ' + str(status) + '\n '
+                    ch_report += str(num + 1) + '. ' + worker + ' @' + t_id + ' : ' + str(status) + '\n'
                     num += 1
                 else:
                     if not 6 <= status <= 12:
                         ch_report += str(num + 1) + '. ' + worker + ' @' + t_id + ' : ' + str(status) + '\n'
                         num += 1
+                if num % 30 == 0:
+                    await asyncio.sleep(1/2)
+                    await bot.send_message(manager_group_id, ch_report)
+                    ch_report = ''
             await bot.send_message(manager_group_id, ch_report)
         if lost_names:
             await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту.')
@@ -481,6 +484,7 @@ async def close_all_polls():
     for worker in polls_close:
         for poll in polls_close[worker]:
             try:
+                await asyncio.sleep(1/2)
                 await bot.stop_poll(worker, polls_close[worker][poll][0])
             except TelegramBadRequest as error:
                 if error.__str__() == 'Telegram server says - Bad Request: poll has already been closed':
@@ -807,7 +811,14 @@ async def voting(call, state: FSMContext):
         polls_num[call.user.id] -= 1
         for project_num in call.option_ids:
             if call.user.id not in projects_by_polls:
-                projects_by_polls[call.user.id] = {call.poll_id: [polls[call.poll_id][project_num]]}
+                try:
+                    projects_by_polls[call.user.id] = {call.poll_id: [polls[call.poll_id][project_num]]}
+                except KeyError:
+                    polls_num[call.user.id] += 1
+                    await bot.send_message(call.user.id, "Вы пытатесь отвечать на неактивный опрос, перейдите "
+                                                         "к новым опросам и отвечайте на них, если что-то пошло не так,"
+                                                         " воспользуйтесь командой /resend_polls")
+                    break
             else:
                 if call.poll_id not in projects_by_polls[call.user.id]:
                     projects_by_polls[call.user.id][call.poll_id] = [polls[call.poll_id][project_num]]
