@@ -457,15 +457,20 @@ async def checking(notification):
                     status = status.replace("'", "")
                     ch_report += str(num + 1) + '. ' + worker + ' @' + t_id + ' : ' + str(status) + '\n'
                     num += 1
+                    if num % 30 == 0:
+                        await asyncio.sleep(1/2)
+                        await bot.send_message(manager_group_id, ch_report)
+                        ch_report = ''
                 else:
                     if not 6 <= status <= 12:
                         ch_report += str(num + 1) + '. ' + worker + ' @' + t_id + ' : ' + str(status) + '\n'
                         num += 1
-                if num % 30 == 0:
-                    await asyncio.sleep(1/2)
-                    await bot.send_message(manager_group_id, ch_report)
-                    ch_report = ''
-            await bot.send_message(manager_group_id, ch_report)
+                        if num % 30 == 0:
+                            await asyncio.sleep(1/2)
+                            await bot.send_message(manager_group_id, ch_report)
+                            ch_report = ''
+            if ch_report:
+                await bot.send_message(manager_group_id, ch_report)
         if lost_names:
             await bot.send_message(manager_group_id, f'{lost_names} не указали ФИО боту.')
     else:
